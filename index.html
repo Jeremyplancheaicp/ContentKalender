@@ -520,6 +520,7 @@ function mediaSlot(i, rowType) {
   return `
     <div class="ratio-bar">${ratioBar}</div>
     <div class="media-slot" id="slot_${i}_${rowType}" style="aspect-ratio:${ratio}"
+      ${cur ? `draggable="true" ondragstart="startSlotDrag(event,${i},'${rowType}',${ai})"` : ''}
       ondragover="event.preventDefault();this.classList.add('drag-over')"
       ondragleave="this.classList.remove('drag-over')"
       ondrop="handleDrop(event,${i},'${rowType}')"
@@ -621,9 +622,32 @@ function handleFile(input, i, rowType) {
     .then(() => { save(); rerenderSlot(i,rowType); renderSidebar(); });
 }
 
+function startSlotDrag(e, i, rowType, fileIdx) {
+  e.dataTransfer.setData("application/x-slot", JSON.stringify({i, rowType, fileIdx}));
+  e.dataTransfer.effectAllowed = "copy";
+}
+
 function handleDrop(e, i, rowType) {
   e.preventDefault();
   document.getElementById(`slot_${i}_${rowType}`).classList.remove("drag-over");
+
+  // Internal: Bild von einem Slot in einen anderen kopieren
+  const raw = e.dataTransfer.getData("application/x-slot");
+  if (raw) {
+    try {
+      const { i: si, rowType: sr, fileIdx } = JSON.parse(raw);
+      const file = activeDays()[si][sr]?.files?.[fileIdx];
+      if (file) {
+        const dst = activeDays()[i][rowType];
+        dst.files.push({...file});
+        dst.active = dst.files.length - 1;
+        save(); rerenderSlot(i, rowType); renderSidebar();
+      }
+    } catch {}
+    return;
+  }
+
+  // Extern: Datei vom Computer
   const files = Array.from(e.dataTransfer.files);
   if (!files.length) return;
   Promise.all(files.map(f => uploadAndAdd(f,i,rowType)))
