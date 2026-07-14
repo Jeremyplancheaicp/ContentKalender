@@ -11,10 +11,22 @@ from pathlib import Path
 from datetime import datetime
 
 BASE      = Path(__file__).parent
-UPLOADS   = BASE / "uploads"
-DATA      = BASE / "data.json"
-KALENDER  = BASE / "kalender.json"
-UPLOADS.mkdir(exist_ok=True)
+DATA_DIR  = Path(os.environ.get("DATA_DIR", BASE))
+UPLOADS   = DATA_DIR / "uploads"
+DATA      = DATA_DIR / "data.json"
+KALENDER  = DATA_DIR / "kalender.json"
+UPLOADS.mkdir(parents=True, exist_ok=True)
+
+# Seed persistent volume from the bundled repo data on first boot.
+if DATA_DIR != BASE:
+    import shutil
+    if not DATA.exists() and (BASE / "data.json").exists():
+        shutil.copy(BASE / "data.json", DATA)
+    if not KALENDER.exists() and (BASE / "kalender.json").exists():
+        shutil.copy(BASE / "kalender.json", KALENDER)
+    if not any(UPLOADS.iterdir()) and (BASE / "uploads").is_dir():
+        for f in (BASE / "uploads").iterdir():
+            shutil.copy(f, UPLOADS / f.name)
 
 app = Flask(__name__, static_folder=str(BASE))
 
