@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Content Kalender — AI Studio</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0d0d1a; color: #f0f0f0; font-family: -apple-system, Helvetica, sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
+
+header { background: #12122a; border-bottom: 2px solid #7c3aed; padding: 12px 20px; display: flex; align-items: center; gap: 16px; flex-shrink: 0; width: 100%; }
+header h1 { font-size: 17px; font-weight: 800; white-space: nowrap; }
+header h1 span { color: #7c3aed; }
+#activePersonaName { font-weight: 700; }
+
+.layout { display: flex; flex: 1; min-height: 0; }
+
+/* SIDEBAR */
+.sidebar {
+  width: 160px; flex-shrink: 0; background: #09091a;
+  border-right: 1px solid #1e1e3a; padding: 16px 10px;
+  display: flex; flex-direction: column; gap: 8px;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+}
+.sidebar-title { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: #374151; margin-bottom: 4px; padding: 0 4px; }
+.persona-card {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 12px 8px; border-radius: 12px; cursor: pointer;
+  border: 2px solid transparent; transition: all 0.15s; background: #12122a;
+}
+.persona-card:hover { background: #1a1a35; }
+.persona-avatar {
+  width: 48px; height: 48px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; border: 3px solid transparent;
+}
+.persona-name { font-size: 12px; font-weight: 700; text-align: center; }
+.persona-count { font-size: 9px; color: #6b7280; }
+.del-persona { font-size: 9px; color: #374151; cursor: pointer; }
+.del-persona:hover { color: #ef4444; }
+.sidebar-divider { height: 1px; background: #1e1e3a; margin: 4px 0; }
+.add-persona-wrap input {
+  width: 100%; background: #1a1a35; border: 1px solid #2d2d50;
+  border-radius: 8px; padding: 7px 10px; color: #f0f0f0; font-size: 11px; outline: none; margin-bottom: 5px;
+}
+.add-persona-wrap input:focus { border-color: #7c3aed; }
+.add-persona-wrap button {
+  width: 100%; background: #2d1a5e; border: none; color: #a78bfa;
+  border-radius: 8px; padding: 6px; font-size: 12px; cursor: pointer;
+}
+.add-persona-wrap button:hover { background: #3d2a7e; }
+
+/* MAIN */
+.main { flex: 1; overflow-x: auto; padding: 16px; }
+
+/* GRID — 30 columns */
+.cal-grid { display: grid; grid-template-columns: 80px repeat(30, minmax(120px, 1fr)); gap: 0; width: max-content; min-width: 100%; }
+
+.row-label { display: flex; align-items: center; justify-content: flex-end; padding-right: 10px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+.row-label.bilder { color: #60a5fa; padding-top: 36px; }
+.row-label.story  { color: #f472b6; }
+.row-label.video  { color: #a78bfa; }
+.row-label.info   { color: #6b7280; font-size: 9px; }
+
+.day-header-cell { text-align: center; padding: 4px 3px 8px; }
+.day-num { font-size: 10px; color: #7c3aed; font-weight: 800; margin-bottom: 3px; }
+.day-date { width: 100%; background: #1a1a35; border: 1px solid #2d2d50; border-radius: 5px; padding: 4px 4px; color: #f0f0f0; font-size: 9px; outline: none; text-align: center; }
+.day-date:focus { border-color: #7c3aed; }
+
+.media-cell { padding: 3px; }
+.media-slot { border: 2px dashed #2d2d50; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; position: relative; overflow: hidden; background: #12122a; width: 100%; min-height: 55px; }
+.media-slot:hover { border-color: #7c3aed; background: #1a1a35; }
+.media-slot.drag-over { border-color: #7c3aed; background: #1e1e3a; }
+
+.ratio-bar { display: flex; gap: 2px; margin-bottom: 3px; justify-content: center; flex-wrap: wrap; }
+.ratio-btn { background: #1a1a35; border: 1px solid #2d2d50; border-radius: 4px; color: #6b7280; font-size: 10px; padding: 1px 4px; cursor: pointer; }
+.ratio-btn:hover { border-color: #7c3aed; color: #a78bfa; }
+.ratio-btn.active { border-color: #7c3aed; background: #2a1a4a; color: #a78bfa; }
+
+.slot-icon { font-size: 16px; margin-bottom: 2px; }
+.slot-hint { font-size: 8px; color: #6b7280; text-align: center; }
+.media-slot img, .media-slot video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 6px; transition: opacity 0.6s ease; }
+.media-slot img.fading, .media-slot video.fading { opacity: 0; }
+.media-remove { position: absolute; top: 3px; right: 3px; background: rgba(0,0,0,0.75); border: none; color: white; border-radius: 50%; width: 18px; height: 18px; cursor: pointer; font-size: 10px; display: none; z-index: 3; align-items: center; justify-content: center; }
+.media-slot:hover .media-remove { display: flex; }
+.add-more { position: absolute; top: 3px; left: 3px; background: rgba(124,58,237,0.85); border: none; color: white; border-radius: 50%; width: 18px; height: 18px; cursor: pointer; font-size: 12px; display: none; z-index: 3; align-items: center; justify-content: center; line-height: 1; }
+.media-slot:hover .add-more { display: flex; }
+
+.carousel-dots { position: absolute; bottom: 3px; left: 0; right: 0; display: flex; justify-content: center; gap: 3px; z-index: 3; }
+.dot { width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,0.4); border: none; cursor: pointer; padding: 0; }
+.dot.active { background: white; }
+
+.row-bilder .media-slot { border-color: #1e2d50; } .row-bilder .media-slot:hover { border-color: #60a5fa; }
+.row-story  .media-slot { border-color: #3a1a2a; } .row-story  .media-slot:hover { border-color: #f472b6; }
+.row-video  .media-slot { border-color: #2a1a3a; } .row-video  .media-slot:hover { border-color: #a78bfa; }
+
+.slot-comment {
+  width: 100%; margin-top: 4px;
+  background: #0d0d1a; border: 1px solid #2a2000;
+  border-radius: 6px; padding: 5px 6px;
+  color: #fbbf24; font-size: 9px; outline: none;
+  resize: none; height: 46px; line-height: 1.4; font-family: inherit;
+}
+.slot-comment:focus { border-color: #fbbf24; }
+.slot-comment::placeholder { color: #3a2800; }
+
+.info-cell { padding: 3px; }
+.info-box { background: #14142a; border-radius: 8px; border: 1px solid #1e1e3a; padding: 6px; }
+.field-label { font-size: 8px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 2px; }
+.info-box select, .info-box input, .info-box textarea {
+  width: 100%; background: #1a1a35; border: 1px solid #2d2d50; border-radius: 5px;
+  padding: 4px 5px; color: #f0f0f0; font-size: 10px; outline: none; margin-bottom: 4px;
+}
+.info-box textarea { resize: none; height: 44px; line-height: 1.4; }
+.info-box select option { background: #1a1a35; }
+.status-row { display: flex; gap: 2px; }
+.status-btn { flex: 1; border: none; border-radius: 4px; padding: 3px 1px; font-size: 7px; font-weight: 700; cursor: pointer; text-transform: uppercase; opacity: 0.4; }
+.status-btn.active { opacity: 1; }
+.s-geplant  { background: #1e3a5f; color: #60a5fa; }
+.s-entwurf  { background: #3a2500; color: #f97316; }
+.s-gepostet { background: #14532d; color: #4ade80; }
+
+.section-header { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 10px 4px 4px; }
+.sec-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+.sec-line { flex: 1; height: 1px; }
+
+/* TOGGLE SWITCH */
+.toggle-wrap { display: flex; align-items: center; gap: 10px; margin-left: auto; background: #1a1a35; border: 1px solid #2d2d50; border-radius: 20px; padding: 6px 14px; }
+.toggle-label { font-size: 12px; color: #a78bfa; white-space: nowrap; font-weight: 600; }
+.toggle { position: relative; width: 46px; height: 26px; flex-shrink: 0; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; inset: 0; background: #2d2d50; border-radius: 26px; cursor: pointer; transition: background 0.25s;
+}
+.toggle-slider:before {
+  content: ""; position: absolute; width: 20px; height: 20px; left: 3px; top: 3px;
+  background: white; border-radius: 50%; transition: transform 0.25s;
+}
+.toggle input:checked + .toggle-slider { background: #7c3aed; }
+.toggle input:checked + .toggle-slider:before { transform: translateX(20px); }
+
+/* LIGHTBOX */
+#lbBackdrop {
+  display: none; position: fixed; inset: 0; z-index: 8000;
+  background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+}
+#lbBackdrop.open { display: block; }
+#lbPanel {
+  position: fixed; z-index: 8001;
+  background: #12122a; border: 1px solid #2d2d50;
+  border-radius: 14px; box-shadow: 0 24px 80px rgba(0,0,0,0.8);
+  display: none; flex-direction: column; overflow: hidden;
+  min-width: 240px; min-height: 200px;
+  resize: both;
+}
+#lbPanel.open { display: flex; }
+#lbBar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; background: #1a1a35; cursor: grab; user-select: none; flex-shrink: 0;
+}
+#lbBar:active { cursor: grabbing; }
+#lbBar span { font-size: 11px; color: #6b7280; }
+#lbActions { display: flex; gap: 6px; align-items: center; }
+#lbDownload {
+  background: #7c3aed; border: none; color: white; border-radius: 6px;
+  padding: 4px 10px; font-size: 11px; cursor: pointer; text-decoration: none;
+  display: flex; align-items: center; gap: 4px;
+}
+#lbDownload:hover { background: #6d28d9; }
+#lbClose {
+  background: #2d2d50; border: none; color: #9ca3af; border-radius: 6px;
+  width: 26px; height: 26px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;
+}
+#lbClose:hover { background: #ef4444; color: white; }
+#lbContent { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 12px; }
+#lbContent img, #lbContent video {
+  max-width: 100%; max-height: 100%; object-fit: contain;
+  border-radius: 8px; cursor: grab;
+}
+#lbHint { font-size: 10px; color: #374151; text-align: center; padding: 6px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<!-- PASSWORD GATE -->
+<div id="pwGate" style="position:fixed;inset:0;background:#09091a;z-index:9999;display:flex;align-items:center;justify-content:center">
+  <div style="background:#12122a;border:2px solid #7c3aed;border-radius:16px;padding:40px;text-align:center;width:320px">
+    <div style="font-size:40px;margin-bottom:16px">🔐</div>
+    <h2 style="font-size:18px;font-weight:800;margin-bottom:6px">Content Kalender</h2>
+    <p style="color:#6b7280;font-size:12px;margin-bottom:24px">Bitte Passwort eingeben</p>
+    <input id="pwInput" type="password" placeholder="••••••••"
+      style="width:100%;background:#1a1a35;border:2px solid #2d2d50;border-radius:10px;padding:12px 16px;color:#f0f0f0;font-size:18px;text-align:center;outline:none;letter-spacing:6px;margin-bottom:12px"
+      onkeydown="if(event.key==='Enter')checkPw()">
+    <button onclick="checkPw()"
+      style="width:100%;background:#7c3aed;border:none;color:white;border-radius:10px;padding:12px;font-size:14px;font-weight:700;cursor:pointer">
+      Einloggen →
+    </button>
+    <p id="pwError" style="color:#ef4444;font-size:12px;margin-top:10px;display:none">Falsches Passwort</p>
+  </div>
+</div>
+
+<div id="appContent" style="display:none;flex-direction:column;min-height:100vh">
+
+<header>
+  <h1>📅 Content <span>Kalender</span></h1>
+  <span style="font-size:13px;color:#9ca3af">Model: <span id="activePersonaName" style="color:#f472b6">—</span></span>
+  <div class="toggle-wrap">
+    <span class="toggle-label">🎞 Slideshow</span>
+    <label class="toggle">
+      <input type="checkbox" id="slideshowToggle" checked onchange="toggleSlideshow(this.checked)">
+      <span class="toggle-slider"></span>
+    </label>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-title">Models</div>
+    <div id="personaList"></div>
+    <div class="sidebar-divider"></div>
+    <div class="add-persona-wrap">
+      <input id="newPersona" placeholder="Neues Model..." onkeydown="if(event.key==='Enter')addPersona()">
+      <button onclick="addPersona()">+ Hinzufügen</button>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="cal-grid" id="calGrid"></div>
+  </div>
+</div>
+
+</div>
+
+<!-- LIGHTBOX -->
+<div id="lbBackdrop" onclick="closeLightbox()"></div>
+<div id="lbPanel">
+  <div id="lbBar">
+    <span id="lbTitle">Vorschau</span>
+    <div id="lbActions">
+      <a id="lbDownload" download>⬇ Herunterladen</a>
+      <button id="lbClose" onclick="closeLightbox()">✕</button>
+    </div>
+  </div>
+  <div id="lbContent"></div>
+  <div id="lbHint">Bild auf den Desktop ziehen zum Speichern</div>
+</div>
+
+<script>
+const PLATFORMS = ["Instagram","TikTok","Fanvue","Facebook","Threads"];
+const STATUSES  = ["geplant","entwurf","gepostet"];
+const DAYS      = 30;
+const RATIOS    = [
+  {label:"1:1",  value:"1/1",  icon:"⬜"},
+  {label:"4:5",  value:"4/5",  icon:"📸"},
+  {label:"9:16", value:"9/16", icon:"📱"},
+  {label:"16:9", value:"16/9", icon:"🖥"},
+];
+const PERSONA_COLORS = ["#f472b6","#818cf8","#34d399","#fb923c","#60a5fa","#f87171"];
+const PERSONA_EMOJI  = ["🌸","🌙","✨","🌿","⭐","💫"];
+
+let data = defaultData();
+
+function defaultDays() {
+  return Array.from({length: DAYS}, (_, i) => ({
+    id: i, date: "", platform: "Instagram",
+    caption: "", hashtags: "", status: "geplant",
+    bilder: { files:[], active:0, ratio:"1/1" },
+    story:  { files:[], active:0, ratio:"9/16" },
+    video:  { files:[], active:0, ratio:"16/9" },
+  }));
+}
+
+function defaultData() {
+  return {
+    personas: ["Bianca","Luna","Mia"],
+    activePersona: "Bianca",
+    byPersona: {
+      "Bianca": { days: defaultDays() },
+      "Luna":   { days: defaultDays() },
+      "Mia":    { days: defaultDays() },
+    }
+  };
+}
+
+function migrate(d) {
+  if (!d) return defaultData();
+
+  // Had months/weeks structure — flatten back to days
+  if (d.byPersona) {
+    Object.keys(d.byPersona).forEach(p => {
+      const pd = d.byPersona[p];
+      if (pd.months) {
+        // Take first month's first week days as base
+        const firstMonth = Object.values(pd.months)[0];
+        const firstWeekDays = Array.isArray(firstMonth)
+          ? firstMonth[0]?.days || []
+          : firstMonth?.weeks?.[0]?.days || [];
+        const newDays = defaultDays();
+        firstWeekDays.forEach((d, i) => { if (i < DAYS) newDays[i] = d; });
+        pd.days = newDays;
+        delete pd.months;
+      }
+      if (!pd.days) pd.days = defaultDays();
+      // Pad to 30 days if shorter
+      while (pd.days.length < DAYS) {
+        const i = pd.days.length;
+        pd.days.push({ id:i, date:"", platform:"Instagram", caption:"", hashtags:"", status:"geplant",
+          bilder:{files:[],active:0,ratio:"1/1"}, story:{files:[],active:0,ratio:"9/16"}, video:{files:[],active:0,ratio:"16/9"} });
+      }
+    });
+  }
+
+  if (!d.byPersona) d.byPersona = {};
+  if (!d.personas || d.personas.includes("Tatjana") || d.personas.includes("Zara"))
+    d.personas = ["Bianca","Luna","Mia"];
+  d.personas.forEach(p => {
+    if (!d.byPersona[p]) d.byPersona[p] = { days: defaultDays() };
+  });
+  if (!d.activePersona || !d.personas.includes(d.activePersona)) d.activePersona = d.personas[0];
+  if (!d.personaPhotos) d.personaPhotos = {};
+  if (!d.personaPhotoPos) d.personaPhotoPos = {};
+  if (!d.personaEmojis) d.personaEmojis = {};
+  return d;
+}
+
+let _saveTimer = null;
+function save() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    fetch("/kalender", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(data) });
+  }, 800);
+}
+
+async function boot() {
+  let serverData = null;
+  try { const r = await fetch("/kalender"); serverData = await r.json(); } catch {}
+  if (!serverData) {
+    try { serverData = JSON.parse(localStorage.getItem("contentkal2") || "null"); } catch {}
+  }
+  data = migrate(serverData);
+  await fetch("/kalender", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(data) });
+  renderSidebar();
+  render();
+}
+
+function activeDays() { return data.byPersona[data.activePersona].days; }
+
+function personaColor(name) { return PERSONA_COLORS[data.personas.indexOf(name) % PERSONA_COLORS.length]; }
+function personaEmoji(name) { return (data.personaEmojis||{})[name] || PERSONA_EMOJI[data.personas.indexOf(name) % PERSONA_EMOJI.length]; }
+function personaPhoto(name) { return (data.personaPhotos || {})[name] || null; }
+
+// ── SIDEBAR ────────────────────────────────────────────────────────────────
+function renderSidebar() {
+  const col = personaColor(data.activePersona);
+  document.getElementById("activePersonaName").textContent = data.activePersona;
+  document.getElementById("activePersonaName").style.color = col;
+
+  document.getElementById("personaList").innerHTML = data.personas.map(p => {
+    const c      = personaColor(p);
+    const em     = personaEmoji(p);
+    const photo  = personaPhoto(p);
+    const filled = (data.byPersona[p]?.days || []).reduce((n,d) =>
+      n + (d.bilder?.files?.length||0) + (d.story?.files?.length||0) + (d.video?.files?.length||0), 0);
+    const active = p === data.activePersona;
+    const pos = (data.personaPhotoPos || {})[p] ?? 20;
+    if (photo) {
+      return `
+        <div class="persona-card ${active?'active':''}" style="padding:0;position:relative;overflow:hidden;border-color:${active?c:'transparent'};height:130px" onclick="switchPersona('${p}')">
+          <img src="${photo}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center ${pos}%">
+          <div style="position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,0.75) 0%,transparent 55%)"></div>
+          <div style="position:absolute;bottom:0;left:0;right:0;padding:6px 8px;z-index:1">
+            <div style="font-size:13px;font-weight:800;color:white;text-shadow:0 1px 3px rgba(0,0,0,0.9)">${em} ${p}</div>
+            <div style="font-size:9px;color:rgba(255,255,255,0.6)">${filled} Inhalte</div>
+          </div>
+        </div>`;
+    }
+    return `
+      <div class="persona-card ${active?'active':''}" style="${active?`border-color:${c}`:''}" onclick="switchPersona('${p}')">
+        <div class="persona-avatar" style="background:${c}22;border-color:${active?c:'transparent'};color:${c}">${em}</div>
+        <div class="persona-name" style="color:${active?c:'#f0f0f0'}">${p}</div>
+        <div class="persona-count">${filled} Inhalte</div>
+        ${!active?`<span class="del-persona" onclick="event.stopPropagation();delPersona('${p}')">✕ löschen</span>`:''}
+      </div>`;
+  }).join("");
+}
+
+function shiftPhotoPos(name, delta) {
+  if (!data.personaPhotoPos) data.personaPhotoPos = {};
+  const cur = data.personaPhotoPos[name] ?? 15;
+  data.personaPhotoPos[name] = Math.max(0, Math.min(100, cur + delta));
+  save(); renderSidebar();
+}
+
+function uploadPersonaPhoto(event, name) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append("file", file);
+  fetch("/upload", {method:"POST",body:fd}).then(r=>r.json()).then(d => {
+    if (!data.personaPhotos) data.personaPhotos = {};
+    data.personaPhotos[name] = d.url;
+    save(); renderSidebar();
+  });
+}
+
+function switchPersona(name) {
+  data.activePersona = name;
+  save(); renderSidebar(); render();
+}
+
+function addPersona() {
+  const name = document.getElementById("newPersona").value.trim();
+  if (!name || data.personas.includes(name)) return;
+  data.personas.push(name);
+  data.byPersona[name] = { days: defaultDays() };
+  document.getElementById("newPersona").value = "";
+  save(); renderSidebar();
+}
+
+function delPersona(name) {
+  if (data.personas.length <= 1) return;
+  if (!confirm(`"${name}" und alle Inhalte löschen?`)) return;
+  data.personas = data.personas.filter(p => p !== name);
+  delete data.byPersona[name];
+  if (data.activePersona === name) data.activePersona = data.personas[0];
+  save(); renderSidebar(); render();
+}
+
+// ── GRID ───────────────────────────────────────────────────────────────────
+function render() {
+  const g    = document.getElementById("calGrid");
+  const days = activeDays();
+  const col  = personaColor(data.activePersona);
+
+  let html = `<div></div>`;
+  for (let i = 0; i < DAYS; i++) {
+    html += `
+      <div class="day-header-cell">
+        <div class="day-num" style="color:${col}">Tag ${i+1}</div>
+        <input class="day-date" type="date" value="${days[i].date||''}" onchange="setDay(${i},'date',this.value)">
+      </div>`;
+  }
+
+  // BILDER
+  html += `<div class="section-header"><span class="sec-title" style="color:#60a5fa">📷 Bilder</span><div class="sec-line" style="background:#1e2d50"></div></div>`;
+  html += `<div class="row-label bilder"></div>`;
+  for (let i = 0; i < DAYS; i++) html += `<div class="media-cell row-bilder">${mediaSlot(i,'bilder')}</div>`;
+
+  // STORY
+  html += `<div class="section-header"><span class="sec-title" style="color:#f472b6">⭕ Stories</span><div class="sec-line" style="background:#3a1a2a"></div></div>`;
+  html += `<div class="row-label story"></div>`;
+  for (let i = 0; i < DAYS; i++) html += `<div class="media-cell row-story">${mediaSlot(i,'story')}</div>`;
+
+  // VIDEO
+  html += `<div class="section-header"><span class="sec-title" style="color:#a78bfa">🎬 Videos / Reels</span><div class="sec-line" style="background:#2a1a3a"></div></div>`;
+  html += `<div class="row-label video"></div>`;
+  for (let i = 0; i < DAYS; i++) html += `<div class="media-cell row-video">${mediaSlot(i,'video')}</div>`;
+
+  // DETAILS
+  html += `<div class="section-header"><span class="sec-title" style="color:#6b7280">📝 Details</span><div class="sec-line" style="background:#1e1e3a"></div></div>`;
+  html += `<div class="row-label info"></div>`;
+  for (let i = 0; i < DAYS; i++) {
+    const d = days[i];
+    const platOpts = PLATFORMS.map(p => `<option ${p===d.platform?'selected':''}>${p}</option>`).join("");
+    const stBtns   = STATUSES.map(s =>
+      `<button class="status-btn s-${s} ${d.status===s?'active':''}" onclick="setDay(${i},'status','${s}');rerenderInfo(${i})">${s}</button>`).join("");
+    html += `
+      <div class="info-cell" id="info${i}">
+        <div class="info-box">
+          <div class="field-label">Plattform</div>
+          <select onchange="setDay(${i},'platform',this.value)">${platOpts}</select>
+          <div class="field-label">Caption</div>
+          <textarea placeholder="Post-Text..." onchange="setDay(${i},'caption',this.value)">${d.caption||""}</textarea>
+          <div class="field-label">Hashtags</div>
+          <input type="text" value="${d.hashtags||""}" placeholder="#tag1 #tag2" onchange="setDay(${i},'hashtags',this.value)">
+          <div class="status-row">${stBtns}</div>
+        </div>
+      </div>`;
+  }
+
+  g.innerHTML = html;
+  startAllTimers();
+}
+
+function migrateSlot(slot, rowType) {
+  if (!slot.files) {
+    return { files: slot.media?[{url:slot.media,type:slot.mediaType||'image'}]:[], active:0,
+             ratio: slot.ratio||(rowType==='story'?'9/16':rowType==='video'?'16/9':'1/1') };
+  }
+  return slot;
+}
+
+function mediaSlot(i, rowType) {
+  const days  = activeDays();
+  const slot  = migrateSlot(days[i][rowType], rowType);
+  days[i][rowType] = slot;
+  const { ratio, files } = slot;
+  const ai  = Math.min(slot.active, Math.max(0, files.length-1));
+  const cur = files[ai];
+
+  const inner = cur
+    ? (cur.type==='video'
+        ? `<video src="${cur.url}" muted loop autoplay style="cursor:zoom-in"></video>`
+        : `<img src="${cur.url}" style="cursor:zoom-in">`)
+    : `<div class="slot-icon">${rowType==='bilder'?'🖼':rowType==='story'?'⭕':'🎬'}</div><div class="slot-hint">+</div>`;
+
+  const slotClick = cur
+    ? `openLightbox(${JSON.stringify(cur.url)},${JSON.stringify(cur.type||'image')})`
+    : `document.getElementById('file_${i}_${rowType}').click()`;
+
+  const dots = files.length > 1
+    ? `<div class="carousel-dots">${files.map((_,di) =>
+        `<button class="dot ${di===ai?'active':''}" onclick="event.stopPropagation();goSlide(${i},'${rowType}',${di})"></button>`
+      ).join("")}</div>` : '';
+
+  const ratioBar = RATIOS.map(r =>
+    `<button class="ratio-btn ${ratio===r.value?'active':''}" onclick="event.stopPropagation();setRatio(${i},'${rowType}','${r.value}')" title="${r.label}">${r.icon}</button>`
+  ).join("");
+
+  const comment = slot.comment || "";
+  return `
+    <div class="ratio-bar">${ratioBar}</div>
+    <div class="media-slot" id="slot_${i}_${rowType}" style="aspect-ratio:${ratio}"
+      ondragover="event.preventDefault();this.classList.add('drag-over')"
+      ondragleave="this.classList.remove('drag-over')"
+      ondrop="handleDrop(event,${i},'${rowType}')"
+      onclick="${slotClick}">
+      ${inner}${dots}
+      ${cur?`<button class="media-remove" onclick="event.stopPropagation();removeMedia(event,${i},'${rowType}')">✕</button>`:''}
+      ${cur?`<button class="add-more" onclick="event.stopPropagation();document.getElementById('file_${i}_${rowType}').click()">+</button>`:''}
+    </div>
+    <textarea class="slot-comment" placeholder="💬 Kommentar..."
+      onclick="event.stopPropagation()"
+      onchange="setSlotComment(${i},'${rowType}',this.value)">${comment}</textarea>
+    <input type="file" id="file_${i}_${rowType}" accept="image/*,video/*" multiple
+      style="display:none" onchange="handleFile(this,${i},'${rowType}')">`;
+}
+
+// ── ACTIONS ────────────────────────────────────────────────────────────────
+function setDay(i, key, val) { activeDays()[i][key] = val; save(); }
+
+function rerenderInfo(i) {
+  const d = activeDays()[i];
+  document.querySelector(`#info${i} .status-row`).innerHTML =
+    STATUSES.map(s =>
+      `<button class="status-btn s-${s} ${d.status===s?'active':''}" onclick="setDay(${i},'status','${s}');rerenderInfo(${i})">${s}</button>`
+    ).join("");
+}
+
+function setSlotComment(i, rowType, val) { activeDays()[i][rowType].comment = val; save(); }
+function setRatio(i, rowType, ratio) { activeDays()[i][rowType].ratio = ratio; save(); rerenderSlot(i,rowType); }
+function goSlide(i, rowType, idx)    { activeDays()[i][rowType].active = idx;  save(); updateCarouselDOM(i,rowType); resetTimer(i,rowType); }
+
+// ── CAROUSEL AUTO-CYCLE ───────────────────────────────────────────────────
+const _timers = {};
+
+function updateCarouselDOM(i, rowType) {
+  const slot   = activeDays()[i][rowType];
+  const slotEl = document.getElementById(`slot_${i}_${rowType}`);
+  if (!slotEl || !slot?.files?.length) return;
+  const cur = slot.files[slot.active];
+  if (!cur) return;
+  const el = slotEl.querySelector('img') || slotEl.querySelector('video');
+  if (!el) return;
+  el.classList.add('fading');
+  setTimeout(() => {
+    el.src = cur.url;
+    el.classList.remove('fading');
+    slotEl.querySelectorAll('.dot').forEach((d, di) => d.classList.toggle('active', di === slot.active));
+  }, 500);
+}
+
+function resetTimer(i, rowType) {
+  const key  = `${i}_${rowType}`;
+  clearInterval(_timers[key]);
+  const slot = activeDays()[i][rowType];
+  if (!slot?.files || slot.files.length <= 1) return;
+  _timers[key] = setInterval(() => {
+    slot.active = (slot.active + 1) % slot.files.length;
+    updateCarouselDOM(i, rowType);
+  }, 7000);
+}
+
+function startAllTimers() {
+  Object.values(_timers).forEach(clearInterval);
+  Object.keys(_timers).forEach(k => delete _timers[k]);
+  const days = activeDays();
+  for (let i = 0; i < DAYS; i++) {
+    ['bilder','story','video'].forEach(rowType => {
+      if ((days[i][rowType]?.files?.length || 0) > 1) resetTimer(i, rowType);
+    });
+  }
+}
+
+function stopTimer(i, rowType) {
+  const key = `${i}_${rowType}`;
+  clearInterval(_timers[key]);
+  delete _timers[key];
+}
+
+function toggleSlideshow(on) {
+  if (on) startAllTimers();
+  else { Object.values(_timers).forEach(clearInterval); Object.keys(_timers).forEach(k => delete _timers[k]); }
+}
+
+function uploadAndAdd(file, i, rowType) {
+  const fd = new FormData();
+  fd.append("file", file);
+  return fetch("/upload", {method:"POST",body:fd}).then(r=>r.json()).then(d => {
+    if (d.url) {
+      const slot = activeDays()[i][rowType];
+      slot.files.push({url:d.url, type:file.type.startsWith("video")?"video":"image"});
+      slot.active = slot.files.length - 1;
+    }
+  });
+}
+
+function handleFile(input, i, rowType) {
+  const files = Array.from(input.files);
+  if (!files.length) return;
+  Promise.all(files.map(f => uploadAndAdd(f,i,rowType)))
+    .then(() => { save(); rerenderSlot(i,rowType); renderSidebar(); });
+}
+
+function handleDrop(e, i, rowType) {
+  e.preventDefault();
+  document.getElementById(`slot_${i}_${rowType}`).classList.remove("drag-over");
+  const files = Array.from(e.dataTransfer.files);
+  if (!files.length) return;
+  Promise.all(files.map(f => uploadAndAdd(f,i,rowType)))
+    .then(() => { save(); rerenderSlot(i,rowType); renderSidebar(); });
+}
+
+function removeMedia(e, i, rowType) {
+  e.stopPropagation();
+  const slot = activeDays()[i][rowType];
+  slot.files.splice(slot.active, 1);
+  slot.active = Math.max(0, slot.active - 1);
+  save(); rerenderSlot(i,rowType); renderSidebar();
+}
+
+function rerenderSlot(i, rowType) {
+  stopTimer(i, rowType);
+  const wrap = document.getElementById(`slot_${i}_${rowType}`)?.parentElement;
+  if (!wrap) return;
+  wrap.innerHTML = mediaSlot(i, rowType);
+  if ((activeDays()[i][rowType]?.files?.length || 0) > 1) resetTimer(i, rowType);
+}
+
+// ── LIGHTBOX ──────────────────────────────────────────────────────────────
+function openLightbox(url, type) {
+  const panel   = document.getElementById("lbPanel");
+  const content = document.getElementById("lbContent");
+  const dl      = document.getElementById("lbDownload");
+  const title   = document.getElementById("lbTitle");
+
+  // Build media element
+  content.innerHTML = type === "video"
+    ? `<video src="${url}" controls autoplay loop style="max-width:100%;max-height:100%;border-radius:8px"></video>`
+    : `<img src="${url}" draggable="true" style="max-width:100%;max-height:100%;border-radius:8px;cursor:grab" title="Auf Desktop ziehen zum Speichern">`;
+
+  // Download button
+  const filename = url.split("/").pop();
+  dl.href = url;
+  dl.download = filename;
+  title.textContent = filename;
+
+  // Size & position: center on screen, 70% viewport
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const pw = Math.min(vw * 0.7, 900), ph = Math.min(vh * 0.8, 700);
+  const px = (vw - pw) / 2, py = (vh - ph) / 2;
+  Object.assign(panel.style, {
+    width: pw + "px", height: ph + "px",
+    left: px + "px", top: py + "px",
+  });
+
+  document.getElementById("lbBackdrop").classList.add("open");
+  panel.classList.add("open");
+}
+
+function closeLightbox() {
+  document.getElementById("lbBackdrop").classList.remove("open");
+  document.getElementById("lbPanel").classList.remove("open");
+  document.getElementById("lbContent").innerHTML = "";
+}
+
+// Drag the panel by its title bar
+(function() {
+  let dragging = false, ox = 0, oy = 0;
+  const bar = () => document.getElementById("lbBar");
+  const pan = () => document.getElementById("lbPanel");
+
+  document.addEventListener("mousedown", e => {
+    if (!bar().contains(e.target) || e.target.closest("button, a")) return;
+    dragging = true;
+    const r = pan().getBoundingClientRect();
+    ox = e.clientX - r.left;
+    oy = e.clientY - r.top;
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", e => {
+    if (!dragging) return;
+    const p = pan();
+    p.style.left = Math.max(0, e.clientX - ox) + "px";
+    p.style.top  = Math.max(0, e.clientY - oy) + "px";
+  });
+  document.addEventListener("mouseup", () => { dragging = false; });
+})();
+
+// ── PASSWORD ──────────────────────────────────────────────────────────────
+const PW = "12345678";
+function checkPw() {
+  if (document.getElementById("pwInput").value === PW) {
+    sessionStorage.setItem("kal_auth","1");
+    document.getElementById("pwGate").style.display = "none";
+    const app = document.getElementById("appContent");
+    app.style.display = "flex";
+    boot();
+  } else {
+    document.getElementById("pwError").style.display = "block";
+    document.getElementById("pwInput").value = "";
+    document.getElementById("pwInput").focus();
+  }
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────
+if (sessionStorage.getItem("kal_auth") === "1") {
+  document.getElementById("pwGate").style.display = "none";
+  document.getElementById("appContent").style.display = "flex";
+  boot();
+} else {
+  setTimeout(() => document.getElementById("pwInput").focus(), 100);
+}
+</script>
+</body>
+</html>
