@@ -631,18 +631,35 @@ function handleDrop(e, i, rowType) {
   e.preventDefault();
   document.getElementById(`slot_${i}_${rowType}`).classList.remove("drag-over");
 
-  // Internal: Bild von einem Slot in einen anderen kopieren
+  // Internal: Bild zwischen zwei Slots austauschen
   const raw = e.dataTransfer.getData("application/x-slot");
   if (raw) {
     try {
       const { i: si, rowType: sr, fileIdx } = JSON.parse(raw);
-      const file = activeDays()[si][sr]?.files?.[fileIdx];
-      if (file) {
-        const dst = activeDays()[i][rowType];
-        dst.files.push({...file});
+      if (si === i && sr === rowType) return; // gleicher Slot
+      const src = activeDays()[si][sr];
+      const dst = activeDays()[i][rowType];
+      const srcFile = src?.files?.[fileIdx];
+      if (!srcFile) return;
+
+      if (dst.files.length) {
+        // Ziel hat bereits ein Bild: Bilder tauschen die Plätze
+        const dstFile = dst.files[dst.active];
+        dst.files[dst.active] = srcFile;
+        src.files[fileIdx] = dstFile;
+        src.active = fileIdx;
+      } else {
+        // Ziel ist leer: nichts zum Tauschen, Bild verschieben
+        dst.files.push(srcFile);
         dst.active = dst.files.length - 1;
-        save(); rerenderSlot(i, rowType); renderSidebar();
+        src.files.splice(fileIdx, 1);
+        if (src.active >= fileIdx) src.active = Math.max(0, src.active - 1);
       }
+
+      save();
+      rerenderSlot(i, rowType);
+      rerenderSlot(si, sr);
+      renderSidebar();
     } catch {}
     return;
   }
