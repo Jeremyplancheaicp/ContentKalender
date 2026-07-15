@@ -149,6 +149,34 @@ def debug_backups_list():
 def debug_uploads_list():
     return jsonify(sorted(f.name for f in UPLOADS.iterdir() if f.is_file()))
 
+@app.route("/debug/orphans")
+def debug_orphans():
+    referenced = set()
+    if KALENDER.exists():
+        cal = json.loads(KALENDER.read_text())
+        for persona in cal.get("byPersona", {}).values():
+            for day in persona.get("days", []):
+                for key in ("bilder", "story"):
+                    slot = day.get(key)
+                    if not slot:
+                        continue
+                    for f in slot.get("files", []):
+                        u = f.get("url", "")
+                        if u.startswith("/uploads/"):
+                            referenced.add(u.split("/")[-1])
+    orphans = sorted(f.name for f in UPLOADS.iterdir() if f.is_file() and f.name not in referenced)
+    items = "".join(
+        f'<div style="display:inline-block;margin:8px;text-align:center;vertical-align:top">'
+        f'<img src="/uploads/{o}" style="max-width:180px;max-height:180px;border-radius:8px;display:block;object-fit:cover">'
+        f'<div style="font-size:11px;color:#888;word-break:break-all;max-width:180px;margin-top:4px">{o}</div>'
+        f'</div>'
+        for o in orphans
+    )
+    return (f"<html><body style='background:#111;color:#eee;font-family:sans-serif;padding:20px'>"
+            f"<h2>{len(orphans)} nicht zugeordnete Bilder</h2>"
+            f"<p>Diese Dateien liegen noch auf dem Server, sind aber in keinem Kalendertag mehr verlinkt.</p>"
+            f"{items}</body></html>")
+
 @app.route("/upload", methods=["POST"])
 def upload():
     f = request.files.get("file")
