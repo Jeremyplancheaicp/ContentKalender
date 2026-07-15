@@ -123,10 +123,31 @@ def get_kalender():
         return jsonify(json.loads(KALENDER.read_text()))
     return jsonify(None)
 
+BACKUPS = DATA_DIR / "backups"
+
 @app.route("/kalender", methods=["POST"])
 def save_kalender():
+    if KALENDER.exists():
+        BACKUPS.mkdir(exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup_path = BACKUPS / f"kalender-{stamp}.json"
+        backup_path.write_text(KALENDER.read_text())
+        # Nur die letzten 50 Backups behalten
+        old = sorted(BACKUPS.glob("kalender-*.json"))
+        for f in old[:-50]:
+            f.unlink()
     KALENDER.write_text(json.dumps(request.json, ensure_ascii=False, indent=2))
     return jsonify({"ok": True})
+
+@app.route("/debug/backups-list")
+def debug_backups_list():
+    if not BACKUPS.exists():
+        return jsonify([])
+    return jsonify(sorted(f.name for f in BACKUPS.glob("kalender-*.json")))
+
+@app.route("/debug/uploads-list")
+def debug_uploads_list():
+    return jsonify(sorted(f.name for f in UPLOADS.iterdir() if f.is_file()))
 
 @app.route("/upload", methods=["POST"])
 def upload():
