@@ -422,12 +422,20 @@ function save() {
   _saveTimer = setTimeout(flushDirty, 600);
 }
 
+let _flushing = false;
 async function flushDirty() {
+  // Reentrancy-Schutz: Läuft bereits ein Flush, NICHT parallel starten —
+  // zwei gleichzeitige PUTs tragen dieselbe alte Revision, der zweite kassiert
+  // 409 und der Client übernimmt einen Serverstand OHNE das frisch hochgeladene
+  // Bild ("Bild verschwindet direkt nach dem Upload"). Der laufende Loop
+  // arbeitet neu markierte Personas mit der dann frischen Revision ab.
+  if (_flushing) return;
+  _flushing = true;
   clearTimeout(_retryTimer);
-  const personas = [..._dirty];
-  if (!personas.length) return;
   let anyError = false;
-  for (const p of personas) {
+  try {
+  while (_dirty.size) {
+  const p = _dirty.values().next().value;
     _dirty.delete(p);
     try {
       const r = await fetch(`/kalender/persona/${encodeURIComponent(p)}`, {
@@ -452,10 +460,12 @@ async function flushDirty() {
         throw new Error("HTTP " + r.status);
       }
     } catch (e) {
-      _dirty.add(p);           // nicht verlieren — später erneut versuchen
+      _dirty.add(p);           // nicht verlieren — Retry kommt per Timer
       anyError = true;
+      break;                   // Loop verlassen, sonst Endlosschleife bei Netz-Ausfall
     }
   }
+  } finally { _flushing = false; }
   if (anyError) {
     setSaveState("error");
     _retryTimer = setTimeout(flushDirty, 4000);
