@@ -305,6 +305,18 @@ def debug_disk():
     total, used, free = _sh.disk_usage(DATA_DIR)
     def _dirsize(p):
         return sum(f.stat().st_size for f in p.glob("**/*") if f.is_file()) if p.exists() else 0
+    upload_files = list(UPLOADS.glob("*")) if UPLOADS.exists() else []
+    mtimes = sorted(f.stat().st_mtime for f in upload_files if f.is_file())
+    growth = None
+    if len(mtimes) >= 2:
+        span_days = (mtimes[-1] - mtimes[0]) / 86400
+        if span_days >= 0.5:  # zu kurze Zeitspanne macht die Rate unzuverlaessig
+            growth = {
+                "oldest_upload": datetime.fromtimestamp(mtimes[0]).isoformat(),
+                "newest_upload": datetime.fromtimestamp(mtimes[-1]).isoformat(),
+                "span_days": round(span_days, 1),
+                "uploads_mb_per_day": round(_dirsize(UPLOADS) / 1e6 / span_days, 2),
+            }
     return jsonify({
         "volume_total_mb": round(total / 1e6, 1),
         "volume_used_mb": round(used / 1e6, 1),
@@ -313,6 +325,7 @@ def debug_disk():
         "backups_mb": round(_dirsize(BACKUPS) / 1e6, 1),
         "kalender_json_mb": round((KALENDER.stat().st_size if KALENDER.exists() else 0) / 1e6, 2),
         "backups_count": len(list(BACKUPS.glob("kalender-*.json"))) if BACKUPS.exists() else 0,
+        "growth": growth,
     })
 
 @app.route("/debug/cleanup-backups", methods=["POST"])
