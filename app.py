@@ -299,6 +299,74 @@ def save_kalender():
 
 # ── Debug / Wartung ─────────────────────────────────────────────────────────
 
+@app.route("/debug/disk")
+def debug_disk():
+    import shutil as _sh
+    total, used, free = _sh.disk_usage(DATA_DIR)
+    def _dirsize(p):
+        return sum(f.stat().st_size for f in p.glob("**/*") if f.is_file()) if p.exists() else 0
+    return jsonify({
+        "volume_total_mb": round(total / 1e6, 1),
+        "volume_used_mb": round(used / 1e6, 1),
+        "volume_free_mb": round(free / 1e6, 1),
+        "uploads_mb": round(_dirsize(UPLOADS) / 1e6, 1),
+        "backups_mb": round(_dirsize(BACKUPS) / 1e6, 1),
+        "kalender_json_mb": round((KALENDER.stat().st_size if KALENDER.exists() else 0) / 1e6, 2),
+        "backups_count": len(list(BACKUPS.glob("kalender-*.json"))) if BACKUPS.exists() else 0,
+    })
+
+@app.route("/debug/cleanup-backups", methods=["POST"])
+def debug_cleanup_backups():
+    """Volumen zu voll (z.B. weil ein Kalenderstand mal riesig war und ueber
+    Wochen mitgesichert wurde) -> hier die Backup-Historie hart einkuerzen,
+    ohne den aktuellen Kalender oder die Uploads anzufassen."""
+    keep = max(1, min(int(request.args.get("keep", 5)), 50))
+    if not BACKUPS.exists():
+        return jsonify({"deleted": 0, "kept": 0})
+    with LOCK:
+        all_backups = sorted(BACKUPS.glob("kalender-*.json"))
+        to_delete = all_backups[:-keep] if len(all_backups) > keep else []
+        freed = sum(f.stat().st_size for f in to_delete)
+        for f in to_delete:
+            f.unlink()
+    return jsonify({"deleted": len(to_delete), "kept": len(all_backups) - len(to_delete),
+                     "freed_mb": round(freed / 1e6, 2)})
+
+@app.route("/debug/extract-inline-media", methods=["POST"])
+def debug_extract_inline_media():
+    """Manche alten Eintraege haben ein Bild als data:-URI direkt im JSON statt
+    als Datei in uploads/ (z.B. durch einen frueheren Client-Bug). Das blaeht
+    kalender.json und jedes einzelne Backup davon massiv auf. Extrahiert alle
+    gefundenen data:-URIs in echte Dateien und ersetzt sie durch /uploads/-Links."""
+    import base64, re as _re, uuid as _uuid
+    with LOCK:
+        cal = _load_cal()
+        if cal is None:
+            return jsonify({"error": "Kalender existiert noch nicht"}), 409
+        converted = []
+        for persona, pd in cal.get("byPersona", {}).items():
+            for day in pd.get("days", []):
+                for key in ("bilder", "story", "video"):
+                    slot = day.get(key)
+                    if not slot:
+                        continue
+                    for f in slot.get("files", []):
+                        u = f.get("url", "")
+                        if not u.startswith("data:"):
+                            continue
+                        m = _re.match(r"data:[^;]+;base64,(.*)", u, _re.S)
+                        if not m:
+                            continue
+                        raw = base64.b64decode(m.group(1))
+                        ext = ".png" if "png" in u[:30] else (".jpg" if "jpeg" in u[:30] else ".bin")
+                        name = f"{_uuid.uuid4()}{ext}"
+                        (UPLOADS / name).write_bytes(raw)
+                        f["url"] = f"/uploads/{name}"
+                        converted.append({"persona": persona, "file": name, "bytes": len(raw)})
+        if converted:
+            _save_cal(cal)
+    return jsonify({"converted": converted, "count": len(converted)})
+
 @app.route("/debug/backups-list")
 def debug_backups_list():
     if not BACKUPS.exists():
