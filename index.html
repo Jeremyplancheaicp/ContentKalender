@@ -220,6 +220,16 @@ header h1 span { color: #7c3aed; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .upload-progress { font-size: 10px; color: #a78bfa; font-weight: 700; }
+/* Nicht-verdeckender Upload-Hinweis oben in der Zelle */
+.upload-bar {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: #2a1a4a; color: #c4b5fd; font-size: 9px; font-weight: 700;
+  border-radius: 5px; padding: 3px 6px; margin-bottom: 3px;
+}
+.spinner-sm {
+  width: 10px; height: 10px; border: 2px solid #4c3a7a; border-top-color: #a78bfa;
+  border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block;
+}
 </style>
 </head>
 <body>
@@ -444,14 +454,26 @@ async function flushDirty() {
         body: JSON.stringify({ days: data.byPersona[p].days, rev: data._revs[p] || 0 }),
       });
       if (r.status === 409) {
-        // Jemand anderes hat dieselbe Persona geändert → Serverstand übernehmen.
+        // Konflikt: Serverstand übernehmen, aber lokale Medien, die der Server
+        // noch nicht kennt, NICHT verwerfen — sonst verschwindet ein gerade
+        // hochgeladenes Bild. Wir mergen die Datei-Listen pro Slot per URL.
         const j = await r.json();
         if (Array.isArray(j.days)) {
+          const localDays = data.byPersona[p].days;
+          j.days.forEach((sd, di) => {
+            ["bilder", "story", "video"].forEach(rt => {
+              const local = localDays?.[di]?.[rt]?.files || [];
+              const srv   = sd?.[rt]?.files || [];
+              const seen  = new Set(srv.map(f => f.url));
+              local.forEach(f => { if (f && f.url && !seen.has(f.url)) { srv.push(f); seen.add(f.url); } });
+              if (sd[rt]) sd[rt].files = srv;
+            });
+          });
           data.byPersona[p].days = j.days;
           data._revs[p] = j.rev;
+          _dirty.add(p);  // gemergte lokale Bilder gleich wieder speichern
           if (p === data.activePersona) render();
           renderSidebar();
-          toast(`"${p}" wurde von jemand anderem geändert — Stand neu geladen`, "warn");
         }
       } else if (r.ok) {
         const j = await r.json();
@@ -803,32 +825,45 @@ function toggleSlideshow(on) {
 async function uploadOne(file) {
   const fd = new FormData();
   fd.append("file", file);
-  const r = await fetch("/upload", { method: "POST", body: fd });
+  // Timeout, damit ein hängender Upload nicht ewig als Spinner stehen bleibt.
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 120000);  // 2 Min pro Datei
+  let r;
+  try {
+    r = await fetch("/upload", { method: "POST", body: fd, signal: ctrl.signal });
+  } catch (e) {
+    throw new Error(e.name === "AbortError" ? "Zeitüberschreitung" : "Verbindung unterbrochen");
+  } finally {
+    clearTimeout(to);
+  }
   let d = null;
   try { d = await r.json(); } catch {}
   if (!r.ok || !d || !d.url) throw new Error((d && d.error) || ("HTTP " + r.status));
   return d.url;
 }
 
-function _showUploadOverlay(i, rowType, done, total) {
-  const slotEl = document.getElementById(`slot_${i}_${rowType}`);
-  if (!slotEl) return;
-  let ov = slotEl.querySelector(".upload-overlay");
-  if (!ov) {
-    ov = document.createElement("div");
-    ov.className = "upload-overlay";
-    ov.innerHTML = `<div class="spinner"></div><div class="upload-progress"></div>`;
-    slotEl.appendChild(ov);
+// Progress-Anzeige in der Zelle, OHNE das Bild zu verdecken: ein kleiner
+// Balken oben statt einer Vollflächen-Overlay. So kann er das gerade gezeigte
+// Bild nie überdecken (der alte Overlay-über-Bild-Bug = "lädt für immer").
+function _setCellBusy(i, rowType, text) {
+  const cell = document.getElementById(`slot_${i}_${rowType}`)?.parentElement;
+  if (!cell) return;
+  let bar = cell.querySelector(".upload-bar");
+  if (text == null) { bar?.remove(); return; }
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.className = "upload-bar";
+    cell.insertBefore(bar, cell.firstChild);
   }
-  ov.querySelector(".upload-progress").textContent = total > 1 ? `${done}/${total}` : "lädt…";
+  bar.innerHTML = `<span class="spinner-sm"></span>${text}`;
 }
 
 async function addFiles(files, i, rowType) {
   if (!files.length) return;
   const persona = data.activePersona;  // festhalten — User könnte währenddessen wechseln
   let ok = 0, failed = [];
-  _showUploadOverlay(i, rowType, 0, files.length);
   for (const f of files) {
+    _setCellBusy(i, rowType, files.length > 1 ? `${ok + 1}/${files.length}` : "lädt…");
     try {
       const url = await uploadOne(f);
       const slot = data.byPersona[persona].days[i][rowType];
@@ -839,17 +874,15 @@ async function addFiles(files, i, rowType) {
       // sind 1-3 sicher im Kalender.
       _dirty.add(persona); clearTimeout(_saveTimer); flushDirty();
       if (persona === data.activePersona) rerenderSlot(i, rowType);
-      _showUploadOverlay(i, rowType, ok, files.length);
     } catch (e) {
-      failed.push(f.name || "Datei");
+      failed.push((f.name || "Datei") + (e.message ? ` (${e.message})` : ""));
     }
   }
-  const slotEl = document.getElementById(`slot_${i}_${rowType}`);
-  slotEl?.querySelector(".upload-overlay")?.remove();
+  _setCellBusy(i, rowType, null);  // Busy-Balken IMMER entfernen
   if (persona === data.activePersona) rerenderSlot(i, rowType);
   renderSidebar();
   if (failed.length) {
-    toast(`${ok} von ${files.length} hochgeladen — fehlgeschlagen: ${failed.join(", ")}. Bitte erneut versuchen.`, "error");
+    toast(`${ok} von ${files.length} hochgeladen — fehlgeschlagen: ${failed.join(", ")}`, "error");
   } else if (files.length > 1) {
     toast(`${ok} Dateien hochgeladen ✓`, "ok");
   }
