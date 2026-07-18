@@ -63,6 +63,56 @@ PLATFORMS = ["Instagram", "TikTok", "Fanvue", "Facebook", "Threads"]
 
 _SAFE_EXT = re.compile(r"^\.[a-z0-9]{1,8}$")
 
+# ── Cloudflare R2 (Objekt-Storage für Uploads) ──────────────────────────────
+# Warum: das Railway-Volume laeuft voll -> Uploads schlagen fehl / Bilder
+# verschwinden. R2 ist praktisch unbegrenzt und ueberlebt jeden Deploy.
+# Aktiv, sobald diese vier Env-Vars gesetzt sind; sonst faellt alles sauber auf
+# die lokale Platte zurueck (das Tool laeuft also mit ODER ohne R2).
+# Auslieferung laeuft ueber /uploads/<name> (Proxy) -> nichts ist oeffentlich,
+# alles bleibt hinter dem (kuenftigen) Login. Objekte liegen unter dem Prefix
+# "contentkalender/" im Bucket, getrennt vom Hauptprodukt.
+R2_ACCOUNT_ID   = os.environ.get("R2_ACCOUNT_ID", "").strip()
+R2_KEY_ID       = os.environ.get("R2_ACCESS_KEY_ID", "").strip()
+R2_SECRET       = os.environ.get("R2_SECRET_ACCESS_KEY", "").strip()
+R2_BUCKET       = os.environ.get("R2_BUCKET_NAME", "").strip()
+R2_PREFIX       = os.environ.get("R2_PREFIX", "contentkalender/").strip()
+R2_ENABLED      = bool(R2_ACCOUNT_ID and R2_KEY_ID and R2_SECRET and R2_BUCKET)
+
+_r2_client = None
+_r2_lock = threading.Lock()
+
+def _r2():
+    global _r2_client
+    if not R2_ENABLED:
+        return None
+    if _r2_client is None:
+        with _r2_lock:
+            if _r2_client is None:
+                import boto3
+                from botocore.config import Config
+                _r2_client = boto3.client(
+                    "s3",
+                    endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+                    aws_access_key_id=R2_KEY_ID,
+                    aws_secret_access_key=R2_SECRET,
+                    config=Config(retries={"max_attempts": 3, "mode": "standard"}),
+                )
+    return _r2_client
+
+def _r2_key(name):
+    return f"{R2_PREFIX}{name}"
+
+_CONTENT_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".webp": "image/webp", ".gif": "image/gif", ".mp4": "video/mp4",
+    ".mov": "video/quicktime", ".webm": "video/webm",
+}
+
+if R2_ENABLED:
+    print(f"[R2] aktiv — Bucket {R2_BUCKET}, Prefix {R2_PREFIX!r}")
+else:
+    print("[R2] nicht konfiguriert — Uploads gehen auf die lokale Platte (Fallback)")
+
 
 # ── Atomare Datei-Helfer ─────────────────────────────────────────────────────
 
@@ -434,6 +484,21 @@ def upload():
     if not _SAFE_EXT.match(ext):
         ext = ".bin"
     name = str(uuid.uuid4()) + ext
+
+    # Bevorzugt R2 (persistent, unbegrenzt); ohne R2-Config -> lokale Platte.
+    if R2_ENABLED:
+        try:
+            data = f.read()
+            if not data:
+                return jsonify({"error": "Datei kam leer an — bitte erneut versuchen"}), 500
+            _r2().put_object(
+                Bucket=R2_BUCKET, Key=_r2_key(name), Body=data,
+                ContentType=_CONTENT_TYPES.get(ext, "application/octet-stream"),
+            )
+            return jsonify({"url": f"/uploads/{name}", "size": len(data), "store": "r2"})
+        except Exception as e:
+            return jsonify({"error": f"R2-Upload fehlgeschlagen: {e.__class__.__name__}"}), 500
+
     dest = UPLOADS / name
     try:
         f.save(str(dest))
@@ -442,17 +507,48 @@ def upload():
     if not dest.exists() or dest.stat().st_size == 0:
         dest.unlink(missing_ok=True)
         return jsonify({"error": "Datei kam leer an — bitte erneut versuchen"}), 500
-    return jsonify({"url": f"/uploads/{name}", "size": dest.stat().st_size})
+    return jsonify({"url": f"/uploads/{name}", "size": dest.stat().st_size, "store": "disk"})
 
 
 @app.route("/uploads/<filename>")
 def media(filename):
-    # Dateinamen sind UUIDs und ändern sich nie → aggressiv cachen. Das
-    # entlastet den Server massiv (90+ Bilder pro Seitenaufbau) und macht
-    # "Bilder laden nicht" durch Server-Überlast deutlich unwahrscheinlicher.
-    resp = send_from_directory(str(UPLOADS), filename, conditional=True)
-    resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
-    return resp
+    # Dateinamen sind UUIDs und aendern sich nie -> aggressiv cachen. Ausliefern
+    # ueber diesen Proxy (nicht direkt aus R2), damit nichts oeffentlich ist und
+    # alles hinter dem (kuenftigen) Login bleibt.
+    # Reihenfolge: erst lokale Platte (alte Uploads + Fallback), dann R2. So
+    # funktionieren bestehende Dateien weiter, egal ob schon migriert.
+    local = UPLOADS / filename
+    if local.exists():
+        resp = send_from_directory(str(UPLOADS), filename, conditional=True)
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return resp
+    if R2_ENABLED:
+        try:
+            obj = _r2().get_object(Bucket=R2_BUCKET, Key=_r2_key(filename))
+            from flask import Response
+            ext = Path(filename).suffix.lower()
+            resp = Response(
+                obj["Body"].read(),
+                mimetype=obj.get("ContentType") or _CONTENT_TYPES.get(ext, "application/octet-stream"),
+            )
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return resp
+        except Exception:
+            pass
+    return jsonify({"error": "nicht gefunden"}), 404
+
+
+@app.route("/debug/r2-status")
+def debug_r2_status():
+    if not R2_ENABLED:
+        return jsonify({"enabled": False, "grund": "R2-Env-Vars nicht gesetzt"})
+    try:
+        r = _r2().list_objects_v2(Bucket=R2_BUCKET, Prefix=R2_PREFIX, MaxKeys=1000)
+        n = r.get("KeyCount", 0)
+        return jsonify({"enabled": True, "bucket": R2_BUCKET, "prefix": R2_PREFIX,
+                        "objekte_in_r2": n})
+    except Exception as e:
+        return jsonify({"enabled": True, "fehler": f"{e.__class__.__name__}: {e}"}), 500
 
 
 if __name__ == "__main__":
